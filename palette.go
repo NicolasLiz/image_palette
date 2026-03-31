@@ -6,7 +6,7 @@ import (
 	"log"
 	"os"
 	"strconv"
-	"strings"
+	"math"
 
 	"image/color"
 	_ "image/jpeg"
@@ -21,13 +21,13 @@ var help string = `command usage: palette <path_to_image> <number_of_colors>`
 func absColor(value color.Color) int {
 	r, g, b, _ := value.RGBA()
 
-	return int(r + g + b)
+	return int((r >> 8) + (g >> 8) + (b >> 8))
 }
 
 func rgbaToHex(value color.Color) string {
 	r, g, b, _ := value.RGBA()
 
-	return strings.ToUpper(fmt.Sprintf("%02x%02x%02x", (r >> 8), (g >> 8), (b >> 8)))
+	return fmt.Sprintf("%02X%02X%02X", (r >> 8), (g >> 8), (b >> 8))
 }
 
 func getImage(path string) (image.Image, image.Point) {
@@ -64,14 +64,13 @@ func main() {
 		amount int
 	}
 
-
 	// color with highest total value (no alpha)
 	var highest struct {
 		value color.Color
 		abs int
 	}
-	for k, _ := range colors {
-		if absColor(k) > highest.abs {
+	for k := range colors {
+		if absColor(k) > highest.abs && absColor(k) < 730 {
 			highest = struct{value color.Color; abs int}{k, absColor(k)}
 		}
 	}
@@ -80,16 +79,44 @@ func main() {
 	Background(lipgloss.Color(fmt.Sprintf("#%s", rgbaToHex(highest.value))))
 	lipgloss.Println(style.Render(fmt.Sprintf("#%s", rgbaToHex(highest.value))))
 
+	// color with lowest total value (no alpha)
+	var lowest struct {
+		value color.Color
+		abs int
+	}
+	lowest.abs = highest.abs
+	for k := range colors {
+		if absColor(k) < lowest.abs && absColor(k) > 50 {
+			lowest = struct{value color.Color; abs int}{k, absColor(k)}
+		}
+	}
+
+	style = lipgloss.NewStyle().
+	Background(lipgloss.Color(fmt.Sprintf("#%s", rgbaToHex(lowest.value))))
+	lipgloss.Println(style.Render(fmt.Sprintf("#%s", rgbaToHex(lowest.value))))
+
 	// most occurring colors good for mono chromatic stuff
 	for k, v := range colors {
+		if absColor(k) > absColor(highest.value) || absColor(k) < absColor(lowest.value) {
+			continue
+		}
 		if len(res) < resLen {
 			res = append(res, struct{value color.Color; amount int}{k, v})
 			continue
 		} else {
 			for i, j := range res { 
 				if v > j.amount {
-					res[i] = struct{value color.Color; amount int}{k, v}		
-					break
+					dif := 0
+					for _, m := range res {
+						if int(math.Abs(float64(absColor(k)) - float64(absColor(m.value)))) < 50 {
+							dif = 1
+							break
+						}
+					}
+					if dif == 0 {
+						res[i] = struct{value color.Color; amount int}{k, v}		
+						break
+					}
 				}
 			}
 		}
@@ -101,5 +128,4 @@ func main() {
 		Background(lipgloss.Color(fmt.Sprintf("#%s", rgbaToHex(j.value))))
 		lipgloss.Println(style.Render(fmt.Sprintf("#%s", rgbaToHex(j.value))))
 	}
-
 }
