@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"image"
 	"log"
+	"math"
 	"os"
 	"strconv"
-	"math"
 
 	"image/color"
 	_ "image/jpeg"
@@ -15,10 +15,107 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
+var help string = `command usage: palette <path_to_image> <number_of_colors> [options]`
 
-var help string = `command usage: palette <path_to_image> <number_of_colors>`
+type colorData struct {
+	value  color.Color
+	amount int
+	abs    int
+	cont   int
+}
 
-func absColor(value color.Color) int {
+func avrgColor(arr []colorData) colorData {
+	var r, g, b, l, c int
+	for _, v := range arr {
+		l += v.abs
+		c += v.cont
+		tr, tg, tb, _ := v.value.RGBA()
+		r += int(tr)
+		g += int(tg)
+		b += int(tb)
+	}
+	r /= len(arr)
+	g /= len(arr)
+	b /= len(arr)
+	r = (r >> 8)
+	g = (g >> 8)
+	b = (b >> 8)
+	l /= len(arr)
+	c /= len(arr)
+	return colorData{color.RGBA{uint8(r), uint8(g), uint8(b), 0}, 0, l, c}
+}
+
+func popHighest(colors map[color.Color]int) color.Color {
+	var res color.Color
+	high := 0
+
+	for i, j := range colors {
+		if j > high {
+			res = i
+			high = j
+		}
+	}
+
+	delete(colors, res)
+
+	return res
+}
+
+func contrast(color1 color.Color, color2 color.Color) int {
+	r, g, b, _ := color1.RGBA()
+	r2, g2, b2, _ := color2.RGBA()
+
+	r = (r >> 8)
+	g = (g >> 8)
+	b = (b >> 8)
+
+	r2 = (r2 >> 8)
+	g2 = (g2 >> 8)
+	b2 = (b2 >> 8)
+
+	r2 -= r
+	g2 -= g
+	b2 -= b
+
+	r2 *= r2
+	g2 *= g2
+	b2 *= b2
+
+	return int(math.Sqrt(float64(r2) + float64(g2) + float64(b2)))
+}
+
+func partition(arr []colorData, low int, high int) int {
+	pivot := arr[high]
+
+	i := low - 1
+
+	for j := low; j <= high-1; j++ {
+		if arr[j].amount < pivot.amount {
+			i++
+			arr[i], arr[j] = arr[j], arr[i]
+		}
+	}
+
+	arr[i+1], arr[high] = arr[high], arr[i+1]
+	return i + 1
+}
+
+func quickSortColors(arr []colorData, low int, high int) {
+	if low < high {
+		pi := partition(arr, low, high)
+
+		quickSortColors(arr, low, pi-1)
+		quickSortColors(arr, pi+1, high)
+	}
+}
+
+func printColor(clr color.Color) {
+	var style = lipgloss.NewStyle().
+		Background(lipgloss.Color(fmt.Sprintf("#%s", rgbaToHex(clr))))
+	lipgloss.Println(style.Render(fmt.Sprintf("#%s", rgbaToHex(clr))))
+}
+
+func luminosity(value color.Color) int {
 	r, g, b, _ := value.RGBA()
 
 	return int((r >> 8) + (g >> 8) + (b >> 8))
@@ -30,102 +127,140 @@ func rgbaToHex(value color.Color) string {
 	return fmt.Sprintf("%02X%02X%02X", (r >> 8), (g >> 8), (b >> 8))
 }
 
-func getImage(path string) (image.Image, image.Point) {
-	f, err := os.Open(os.Args[1])
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer f.Close()
-
-	value, _, err := image.Decode(f)
-	if err != nil {
-		log.Fatal(err)
-	}
-	return value, value.Bounds().Size()
-}
-
 func main() {
+	// process args
 	if len(os.Args) < 3 {
 		log.Fatal(help)
 	}
 
+	imagePath := os.Args[1]
+	numColors := os.Args[2]
+
+	options := make(map[string]string)
+
+	for i, opt := range os.Args {
+		switch opt {
+		case "-h": // highest luminosity
+			options[opt] = os.Args[i+1]
+
+		case "-l": // lowest luminosity
+			options[opt] = os.Args[i+1]
+
+		case "-d":
+			options[opt] = os.Args[i+1]
+
+		case "-c":
+			options[opt] = os.Args[i+1]
+		}
+	}
+
+	// opens image
+	f, err := os.Open(imagePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	imageData, _, err := image.Decode(f)
+	if err != nil {
+		log.Fatal(err)
+	}
+	imageSize := imageData.Bounds().Size()
+
+	f.Close()
+
+	// creates map of colors and how many time they appear
 	colors := make(map[color.Color]int)
 
-	data, size := getImage(os.Args[1])
-	for x := range size.X {
-		for y := range size.Y {
-			colors[data.At(x, y)]++
+	for x := range imageSize.X {
+		for y := range imageSize.Y {
+			colors[imageData.At(x, y)]++
 		}
 	}
 
-	resLen, _ := strconv.Atoi(os.Args[2])
-	var res []struct {
-		value  color.Color
-		amount int
+	// color with highest and lowest luminosity
+	var highest colorData
+	var lowest colorData
+	lowest.abs = 766
+
+	maxLum := 766
+	if val, ok := options["-h"]; ok {
+		maxLum, _ = strconv.Atoi(val)
+	}
+	minLum := 0
+	if val, ok := options["-l"]; ok {
+		minLum, _ = strconv.Atoi(val)
 	}
 
-	// color with highest total value (no alpha)
-	var highest struct {
-		value color.Color
-		abs int
-	}
-	for k := range colors {
-		if absColor(k) > highest.abs && absColor(k) < 730 {
-			highest = struct{value color.Color; abs int}{k, absColor(k)}
-		}
-	}
-
-	var style = lipgloss.NewStyle().
-	Background(lipgloss.Color(fmt.Sprintf("#%s", rgbaToHex(highest.value))))
-	lipgloss.Println(style.Render(fmt.Sprintf("#%s", rgbaToHex(highest.value))))
-
-	// color with lowest total value (no alpha)
-	var lowest struct {
-		value color.Color
-		abs int
-	}
-	lowest.abs = highest.abs
-	for k := range colors {
-		if absColor(k) < lowest.abs && absColor(k) > 50 {
-			lowest = struct{value color.Color; abs int}{k, absColor(k)}
-		}
-	}
-
-	style = lipgloss.NewStyle().
-	Background(lipgloss.Color(fmt.Sprintf("#%s", rgbaToHex(lowest.value))))
-	lipgloss.Println(style.Render(fmt.Sprintf("#%s", rgbaToHex(lowest.value))))
-
-	// most occurring colors good for mono chromatic stuff
 	for k, v := range colors {
-		if absColor(k) > absColor(highest.value) || absColor(k) < absColor(lowest.value) {
+		//highest lum && cont
+		lumK := luminosity(k)
+		if highest.cont == 0 {
+			highest = colorData{k, v, luminosity(k), contrast(k, color.White)}
+		}
+		if lumK >= highest.abs && lumK <= maxLum && contrast(k, color.White) < highest.cont {
+			highest = colorData{k, v, luminosity(k), contrast(k, color.White)}
+		}
+
+		//lowest lum && cont
+		if lowest.cont == 0 {
+			lowest = colorData{k, v, luminosity(k), contrast(k, color.Black)}
+		}
+		if lumK <= lowest.abs && lumK >= minLum && contrast(k, color.Black) < lowest.cont {
+			lowest = colorData{k, v, luminosity(k), contrast(k, color.Black)}
+		}
+	}
+
+	maxColors, err := strconv.Atoi(numColors)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	lumDif := 0
+	if val, ok := options["-d"]; ok {
+		lumDif, _ = strconv.Atoi(val)
+	}
+
+	contDif := 0
+	if val, ok := options["-c"]; ok {
+		contDif, _ = strconv.Atoi(val)
+	}
+
+	var result []colorData
+
+	for k, v := range colors {
+		lumK := luminosity(k)
+
+		if lumK > highest.abs || lumK < lowest.abs {
 			continue
 		}
-		if len(res) < resLen {
-			res = append(res, struct{value color.Color; amount int}{k, v})
-			continue
-		} else {
-			for i, j := range res { 
-				if v > j.amount {
-					dif := 0
-					for _, m := range res {
-						if int(math.Abs(float64(absColor(k)) - float64(absColor(m.value)))) < 50 {
-							dif = 1
-							break
-						}
-					}
-					if dif == 0 {
-						res[i] = struct{value color.Color; amount int}{k, v}		
-						break
-					}
-				}
+
+		f := 0
+		for _, j := range result {
+			if int(math.Abs(float64(lumK)-float64(j.abs))) < lumDif {
+				f = 1
+				break
+			}
+			if contrast(k, j.value) < contDif {
+				f = 1
+				break
 			}
 		}
+		if f == 1 {
+			continue
+		}
+
+		result = append(result, colorData{k, v, 0, 0})
 	}
 
+	quickSortColors(result, 0, len(result)-1)
 
-	for _, j := range res {
-		var style = lipgloss.NewStyle().
-		Background(lipgloss.Color(fmt.Sprintf("#%s", rgbaToHex(j.value))))
-		lipgloss.Println(style.Render(fmt.Sprintf("#%s", rgbaToHex(j.value))))
+	printColor(highest.value)
+	printColor(lowest.value)
+
+	if len(result) > maxColors {
+		result = result[len(result)-maxColors:]
+	}
+	for _, j := range result {
+		printColor(j.value)
 	}
 }
