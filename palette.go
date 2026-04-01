@@ -24,6 +24,19 @@ type colorData struct {
 	cont   int
 }
 
+type colorField struct {
+	base color.Color
+	maxRange int
+	parts int
+}
+
+func inField(field colorField, elem color.Color) bool {
+	if contrast(field.base, elem) <= field.maxRange {
+		return true
+	}
+	return false
+}
+
 func avrgColor(arr []colorData) colorData {
 	var r, g, b, l, c int
 	for _, v := range arr {
@@ -81,7 +94,7 @@ func contrast(color1 color.Color, color2 color.Color) int {
 	g2 *= g2
 	b2 *= b2
 
-	return int(math.Sqrt(float64(r2) + float64(g2) + float64(b2)))
+	return int(math.Abs(math.Sqrt(float64(r2) + float64(g2) + float64(b2))))
 }
 
 func partition(arr []colorData, low int, high int) int {
@@ -170,10 +183,20 @@ func main() {
 
 	// creates map of colors and how many time they appear
 	colors := make(map[color.Color]int)
+	var colorFields []colorField
+	colorFields = append(colorFields, colorField{imageData.At(0, 0), 30, 1})
 
 	for x := range imageSize.X {
 		for y := range imageSize.Y {
 			colors[imageData.At(x, y)]++
+			for i, k := range colorFields {
+				if inField(k, imageData.At(x, y)) {
+					k.parts++
+					break
+				} else if i == len(colorFields) - 1 {
+					colorFields = append(colorFields, colorField{imageData.At(x, y), 30, 1})
+				}
+			}
 		}
 	}
 
