@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"sync"
 
 	"image/color"
 	_ "image/jpeg"
@@ -25,9 +26,11 @@ type colorData struct {
 }
 
 type colorField struct {
-	base color.Color
+	base     color.Color
 	maxRange int
-	parts int
+	parts    int
+	lum		 int
+	cont	 int
 }
 
 func inField(field colorField, elem color.Color) bool {
@@ -97,13 +100,13 @@ func contrast(color1 color.Color, color2 color.Color) int {
 	return int(math.Abs(math.Sqrt(float64(r2) + float64(g2) + float64(b2))))
 }
 
-func partition(arr []colorData, low int, high int) int {
+func partition(arr []colorField, low int, high int) int {
 	pivot := arr[high]
 
 	i := low - 1
 
 	for j := low; j <= high-1; j++ {
-		if arr[j].amount < pivot.amount {
+		if arr[j].parts < pivot.parts {
 			i++
 			arr[i], arr[j] = arr[j], arr[i]
 		}
@@ -113,7 +116,7 @@ func partition(arr []colorData, low int, high int) int {
 	return i + 1
 }
 
-func quickSortColors(arr []colorData, low int, high int) {
+func quickSortColors(arr []colorField, low int, high int) {
 	if low < high {
 		pi := partition(arr, low, high)
 
@@ -164,8 +167,41 @@ func main() {
 
 		case "-c":
 			options[opt] = os.Args[i+1]
+
+		case "-f": //field size
+			options[opt] = os.Args[i+1]
 		}
 	}
+
+	fieldSize := 10
+	if val, ok := options["-f"]; ok {
+		fieldSize, _ = strconv.Atoi(val)
+	}
+
+	maxLum := 765
+	if val, ok := options["-h"]; ok {
+		maxLum, _ = strconv.Atoi(val)
+	}
+	minLum := 0
+	if val, ok := options["-l"]; ok {
+		minLum, _ = strconv.Atoi(val)
+	}
+
+	lumDif := 0
+	if val, ok := options["-d"]; ok {
+		lumDif, _ = strconv.Atoi(val)
+	}
+
+	contDif := 0
+	if val, ok := options["-c"]; ok {
+		contDif, _ = strconv.Atoi(val)
+	}
+
+	maxColors, err := strconv.Atoi(numColors)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 
 	// opens image
 	f, err := os.Open(imagePath)
@@ -182,88 +218,73 @@ func main() {
 	f.Close()
 
 	// creates map of colors and how many time they appear
-	colors := make(map[color.Color]int)
-	var colorFields []colorField
-	colorFields = append(colorFields, colorField{imageData.At(0, 0), 30, 1})
+	var colorFields []*colorField
+	colorFields = append(colorFields, &colorField{imageData.At(0, 0), 0, 1, 0, 0})
 
+	var wg sync.WaitGroup
 	for x := range imageSize.X {
-		for y := range imageSize.Y {
-			colors[imageData.At(x, y)]++
-			for i, k := range colorFields {
-				if inField(k, imageData.At(x, y)) {
-					k.parts++
-					break
-				} else if i == len(colorFields) - 1 {
-					colorFields = append(colorFields, colorField{imageData.At(x, y), 30, 1})
+		wg.Go(func(){
+			for y := range imageSize.Y {
+				for i, k := range colorFields {
+					data := imageData.At(x, y)
+					if inField((*k), data) {
+						k.parts++
+						break
+					} else if i == len(colorFields)-1 {
+						colorFields = append(colorFields, &colorField{data, fieldSize, 1, luminosity(data), 0})
+					}
 				}
 			}
-		}
+		})
 	}
+	wg.Wait()
+
+	colorFields = colorFields[1:]
 
 	// color with highest and lowest luminosity
-	var highest colorData
-	var lowest colorData
-	lowest.abs = 766
+	var highest colorField
+	var lowest colorField
 
-	maxLum := 766
-	if val, ok := options["-h"]; ok {
-		maxLum, _ = strconv.Atoi(val)
-	}
-	minLum := 0
-	if val, ok := options["-l"]; ok {
-		minLum, _ = strconv.Atoi(val)
-	}
-
-	for k, v := range colors {
+	for _, v := range colorFields {
 		//highest lum && cont
-		lumK := luminosity(k)
-		if highest.cont == 0 {
-			highest = colorData{k, v, luminosity(k), contrast(k, color.White)}
+		if highest.parts == 0 {
+			highest = (*v)
+			highest.cont = 441
 		}
-		if lumK >= highest.abs && lumK <= maxLum && contrast(k, color.White) < highest.cont {
-			highest = colorData{k, v, luminosity(k), contrast(k, color.White)}
+		if v.lum >= highest.lum && v.lum <= maxLum && contrast(v.base, color.White) < highest.cont {
+			highest = (*v)
+			highest.cont = contrast(v.base, color.White)
 		}
 
 		//lowest lum && cont
-		if lowest.cont == 0 {
-			lowest = colorData{k, v, luminosity(k), contrast(k, color.Black)}
+		if lowest.parts == 0 {
+			lowest = (*v)
+			highest.cont = 441
 		}
-		if lumK <= lowest.abs && lumK >= minLum && contrast(k, color.Black) < lowest.cont {
-			lowest = colorData{k, v, luminosity(k), contrast(k, color.Black)}
+		if v.lum <= lowest.lum && v.lum >= minLum && contrast(v.base, color.Black) < lowest.cont {
+			lowest = (*v)
+			lowest.cont = contrast(v.base, color.Black)
 		}
 	}
 
-	maxColors, err := strconv.Atoi(numColors)
-	if err != nil {
-		log.Fatal(err)
-	}
+	var result []colorField
 
-	lumDif := 0
-	if val, ok := options["-d"]; ok {
-		lumDif, _ = strconv.Atoi(val)
-	}
+	for _, v := range colorFields {
+		if v.lum > highest.lum || v.lum < lowest.lum {
+			continue
+		}
 
-	contDif := 0
-	if val, ok := options["-c"]; ok {
-		contDif, _ = strconv.Atoi(val)
-	}
-
-	var result []colorData
-
-	for k, v := range colors {
-		lumK := luminosity(k)
-
-		if lumK > highest.abs || lumK < lowest.abs {
+		if (*v) == highest || (*v) == lowest {
 			continue
 		}
 
 		f := 0
 		for _, j := range result {
-			if int(math.Abs(float64(lumK)-float64(j.abs))) < lumDif {
+			if int(math.Abs(float64(v.lum)-float64(j.lum))) < lumDif {
 				f = 1
 				break
 			}
-			if contrast(k, j.value) < contDif {
+			if contrast(v.base, j.base) < contDif {
 				f = 1
 				break
 			}
@@ -272,18 +293,18 @@ func main() {
 			continue
 		}
 
-		result = append(result, colorData{k, v, 0, 0})
+		result = append(result, (*v))
 	}
 
-	quickSortColors(result, 0, len(result)-1)
+	quickSortColors(result, 0, len(result) - 1)
 
-	printColor(highest.value)
-	printColor(lowest.value)
+	printColor(highest.base)
+	printColor(lowest.base)
 
 	if len(result) > maxColors {
-		result = result[len(result)-maxColors:]
+		result = result[len(result) - 1 - maxColors:]
 	}
 	for _, j := range result {
-		printColor(j.value)
+		printColor(j.base)
 	}
 }
