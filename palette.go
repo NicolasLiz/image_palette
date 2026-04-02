@@ -296,6 +296,8 @@ func main() {
 		result = append(result, (*v))
 	}
 
+	quickSortColors(result, 0, len(result) - 1)
+
 	fmt.Println("brightest")
 	printColor(highest.base)
 	fmt.Println("darkest")
