@@ -29,8 +29,8 @@ type colorField struct {
 	base     color.Color
 	maxRange int
 	parts    int
-	lum		 int
-	cont	 int
+	lum      int
+	cont     int
 }
 
 func inField(field colorField, elem color.Color) bool {
@@ -156,44 +156,45 @@ func main() {
 
 	for i, opt := range os.Args {
 		switch opt {
-		case "-h": // highest luminosity
+		case "--high": // highest luminosity
 			options[opt] = os.Args[i+1]
 
-		case "-l": // lowest luminosity
+		case "--low": // lowest luminosity
 			options[opt] = os.Args[i+1]
 
-		case "-d":
+		case "--lumdif":
 			options[opt] = os.Args[i+1]
 
-		case "-c":
+		case "--cntrdif":
 			options[opt] = os.Args[i+1]
 
-		case "-f": //field size
+		case "--field": //field size
 			options[opt] = os.Args[i+1]
 		}
+
 	}
 
 	fieldSize := 10
-	if val, ok := options["-f"]; ok {
+	if val, ok := options["--field"]; ok {
 		fieldSize, _ = strconv.Atoi(val)
 	}
 
 	maxLum := 765
-	if val, ok := options["-h"]; ok {
+	if val, ok := options["--high"]; ok {
 		maxLum, _ = strconv.Atoi(val)
 	}
 	minLum := 0
-	if val, ok := options["-l"]; ok {
+	if val, ok := options["--low"]; ok {
 		minLum, _ = strconv.Atoi(val)
 	}
 
 	lumDif := 0
-	if val, ok := options["-d"]; ok {
+	if val, ok := options["--lumdif"]; ok {
 		lumDif, _ = strconv.Atoi(val)
 	}
 
 	contDif := 0
-	if val, ok := options["-c"]; ok {
+	if val, ok := options["--cntrdif"]; ok {
 		contDif, _ = strconv.Atoi(val)
 	}
 
@@ -201,7 +202,6 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
 
 	// opens image
 	f, err := os.Open(imagePath)
@@ -223,7 +223,7 @@ func main() {
 
 	var wg sync.WaitGroup
 	for x := range imageSize.X {
-		wg.Go(func(){
+		wg.Go(func() {
 			for y := range imageSize.Y {
 				for i, k := range colorFields {
 					data := imageData.At(x, y)
@@ -296,13 +296,13 @@ func main() {
 		result = append(result, (*v))
 	}
 
-	quickSortColors(result, 0, len(result) - 1)
-
+	fmt.Println("brightest")
 	printColor(highest.base)
+	fmt.Println("darkest")
 	printColor(lowest.base)
 
 	if len(result) > maxColors {
-		result = result[len(result) - 1 - maxColors:]
+		result = result[len(result)-maxColors:]
 	}
 	for _, j := range result {
 		printColor(j.base)
